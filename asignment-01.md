@@ -1,4 +1,5 @@
 
+## Silu
 
 ### Profiling silu in pytorch
 Average time: 0.6012162555456162 ms
@@ -25,8 +26,12 @@ Bytes per element: 4
 Total data processed: 2.15 GB
 Memory throughput: 2231.48 GB/s
 
+## RMS Norm
+
 ### TODO?
 - OpenAI has a good visualization of Triton vs Pytorch kernels here
   - https://openai.com/index/triton/
 - profiling in pytorch
   - https://medium.com/biased-algorithms/mastering-memory-profiling-in-pytorch-40007ced2e46
+
+
