@@ -1,3 +1,6 @@
+Using ncu use `--set full
+https://forums.developer.nvidia.com/t/some-metric-set-and-section-are-not-enable/266223
+
 
 ## Silu
 
@@ -26,6 +29,48 @@ Bytes per element: 4
 Total data processed: 2.15 GB
 Memory throughput: 2231.48 GB/s
 
+
+lol not sure how I got those numbers abov
+
+### Pinning dim to 8192x8192 and experimenting with block sizes
+```
+ubuntu@192-222-51-232:~/pripri-labs/cs599k/silu$ python3 silu-triton.py --benchmark
+
+Block Size: 8x8
+Number of blocks: 1048576
+Average time: 1.410 ms
+Memory throughput: 380.77 GB/s
+
+Block Size: 16x16
+Number of blocks: 262144
+Average time: 0.359 ms
+Memory throughput: 1493.83 GB/s
+
+Block Size: 32x32
+Number of blocks: 65536
+Average time: 0.322 ms
+Memory throughput: 1669.81 GB/s
+
+Block Size: 64x64
+Number of blocks: 16384
+Average time: 0.314 ms
+Memory throughput: 1712.22 GB/s
+
+Block Size: 128x128
+Number of blocks: 4096
+Average time: 0.317 ms
+Memory throughput: 1693.38 GB/s
+
+Summary:
+Block Size | Time (ms) | Throughput (GB/s) | Num Blocks
+-------------------------------------------------------
+    8      |   1.410   |     380.77      |  1048576  
+    16     |   0.359   |     1493.83     |   262144  
+    32     |   0.322   |     1669.81     |   65536   
+    64     |   0.314   |     1712.22     |   16384   
+   128     |   0.317   |     1693.38     |    4096  
+```
+
 ## RMS Norm
 
 ### TODO?
@@ -35,3 +80,8 @@ Memory throughput: 2231.48 GB/s
   - https://medium.com/biased-algorithms/mastering-memory-profiling-in-pytorch-40007ced2e46
 
 
+
+
+# Things to try next
+- triton benchmarking / autotune 
+- rms norm, splitting it into two separate kernels
