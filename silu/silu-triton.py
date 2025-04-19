@@ -1,7 +1,12 @@
 import torch
 import triton 
 import triton.language as tl
+import triton.testing
 import matplotlib.pyplot as plt
+import numpy as np
+import time
+def naive_pytorch(x):
+  return x * 1 / (1 + torch.exp(-x))
 
 def main(args):
   torch.manual_seed(0)
@@ -9,19 +14,29 @@ def main(args):
   D = 8192
   x = torch.rand(N, D, device="cuda")
 
+  kernel = silu_naive_non_strided if args.naive else silu_non_strided
+
   if args.benchmark:
-    results = benchmark_block_sizes(x, [8, 16, 32, 64, 128])
+    results = benchmark_block_sizes(kernel,x, [8, 16, 32, 64, 128, 256])
     # Print summary
     print("\nSummary:")
     print("Block Size | Time (ms) | Throughput (GB/s) | Num Blocks")
     print("-" * 55)
     for r in results:
-      print(f"{r['block_size']:^10d} | {r['avg_time_ms']:^9.3f} | {r['throughput_gb_s']:^15.2f} | {r['num_blocks']:^10d}")
+      print(f"{r['block_size']:^10d} | {r['avg_time_ms']:^9.3f} | {r['throughput_gb_s']:^15.2f}")
+    return
+  
+  if args.triton_benchmark:
+    benchmark.run(show_plots=True, print_data=True)
+    return
+
+  if args.single_benchmark:
+    single_benchmark(x)
     return
 
   if not args.profile:
-    output_torch = x * torch.sigmoid(x)
-    output_triton = silu_non_strided(x)
+    output_torch = naive_pytorch(x)
+    output_triton = kernel(x)
     is_close = torch.isclose(output_torch, output_triton)
     print(is_close.all(), is_close.sum())
     return
@@ -29,7 +44,7 @@ def main(args):
   with torch.profiler.profile(with_stack=True, profile_memory=True, activities=[torch.profiler.ProfilerActivity.CPU, torch.profiler.ProfilerActivity.CUDA]) as prof:
     # warmup  
     for _ in range(10):
-      silu_non_strided(x)
+      kernel(x)
 
     # profile
     start_event = torch.cuda.Event(enable_timing=True)
@@ -38,7 +53,7 @@ def main(args):
     checksum = 0.0
     for _ in range(500):
       start_event.record()
-      y = silu_non_strided(x)
+      y = kernel(x)
       checksum += y.sum().item()
       end_event.record()
       torch.cuda.synchronize()
@@ -55,6 +70,57 @@ def main(args):
   prof.export_chrome_trace(f"silu-triton_trace.json")
   print(prof.key_averages().table(sort_by="cuda_time_total", row_limit=10))
   print(prof.key_averages().table(sort_by="cuda_memory_usage", row_limit=10))
+
+@triton.testing.perf_report(
+  triton.testing.Benchmark(
+    x_names=["N"],
+    x_vals=[128 * i for i in range(2, 100)],
+    plot_name="silu-triton-benchmark",
+    line_arg='provider',
+    line_vals=['triton', 'torch'],
+    line_names=["Triton", "Torch"],
+    styles=[('blue', '-'), ('red', '-')],
+    ylabel='GB/s',
+    xlabel='N',
+    args={'M': 4096}
+  )
+)
+def benchmark(M, N, provider):
+  device = torch.device("cuda")
+  x = torch.rand(N, M, device=device)
+  if provider == 'torch':
+    ms = triton.testing.do_bench(lambda: naive_pytorch(x))
+  if provider == 'triton':
+    ms = triton.testing.do_bench(lambda: silu_non_strided(x))
+  gbps = lambda ms: 2 * x.numel() * x.element_size() * 1e-9 / (ms * 1e-3)
+  return gbps(ms) 
+
+@triton.jit
+def silu_kernel_naive(
+  input_ptr,
+  input_row_stride,
+  output_ptr, 
+  n_rows,
+  n_cols: tl.constexpr,
+):
+  row_start = tl.program_id(0) * input_row_stride
+
+  offsets = row_start + tl.arange(0, n_cols)
+  mask = tl.arange(0, n_cols) < n_cols
+
+  x = tl.load(input_ptr + offsets, mask=mask)
+  output = x * tl.sigmoid(x)
+  tl.store(output_ptr + offsets, output, mask=mask)
+
+def silu_naive_non_strided(x, block_size=64, num_warps=2):
+  output = torch.empty_like(x)
+  n_rows, n_cols = x.shape
+
+  grid = (n_rows,)
+  silu_kernel_naive[grid](x, x.stride(0), output, n_rows, n_cols, num_stages=1, num_warps=num_warps)
+  return output
+
+
 
 @triton.jit
 def silu_kernel_non_strided(
@@ -90,57 +156,110 @@ def silu_kernel_non_strided(
 
   tl.store(output_ptr + indicies, output, mask=mask)
 
-def silu_non_strided(x, block_size=64):
+def silu_non_strided(x, block_size=64, num_warps=2):
   output = torch.empty_like(x)
   n_rows, n_cols = x.shape
 
   grid = (triton.cdiv(n_rows, block_size), triton.cdiv(n_cols, block_size))
-  silu_kernel_non_strided[grid](x, output, n_rows, n_cols, block_size, block_size)
+  silu_kernel_non_strided[grid](x, output, n_rows, n_cols, block_size, block_size, num_stages=1,num_warps=num_warps)
   return output
 
-def benchmark_block_sizes(x, block_sizes=[8, 16, 32, 64, 128]):
+def benchmark_block_sizes(kernel, x, block_sizes=[8, 16, 32, 64, 128], warp_counts=[1, 2, 4, 8, 16, 32]):
     results = []
     
-    for block_size in block_sizes:
-        # warmup
-        for _ in range(10):
-            silu_non_strided(x, block_size)
-        
-        # benchmark
-        start_event = torch.cuda.Event(enable_timing=True)
-        end_event = torch.cuda.Event(enable_timing=True)
-        timings = []
-        checksum = 0.0
-        
-        for _ in range(100):  # Reduced from 500 to 100 since we're testing multiple sizes
-            start_event.record()
-            y = silu_non_strided(x, block_size)
-            checksum += y.sum().item()
-            end_event.record()
-            torch.cuda.synchronize()
-            timings.append(start_event.elapsed_time(end_event))
-        
-        average_time = sum(timings) / len(timings)
-        total_data_processed = x.element_size() * x.numel() * 2  # read and write
-        throughput = total_data_processed / average_time * 1000 / 1e9  # GB/s
-        
-        num_blocks = (triton.cdiv(x.shape[0], block_size) * 
-                     triton.cdiv(x.shape[1], block_size))
-        
-        results.append({
-            'block_size': block_size,
-            'avg_time_ms': average_time,
-            'throughput_gb_s': throughput,
-            'num_blocks': num_blocks,
-            'checksum': checksum
-        })
-        
-        print(f"\nBlock Size: {block_size}x{block_size}")
-        print(f"Number of blocks: {num_blocks}")
-        print(f"Average time: {average_time:.3f} ms")
-        print(f"Memory throughput: {throughput:.2f} GB/s")
-        
+    # Prepare data structure for heatmap
+    throughput_data = np.zeros((len(block_sizes), len(warp_counts)))
+    
+    # Loop through configurations
+    for i, block_size in enumerate(block_sizes):
+        for j, num_warps in enumerate(warp_counts):
+            # Warmup
+            for _ in range(10):
+                y = kernel(x, block_size, num_warps)
+            
+            # Benchmark
+            start_event = torch.cuda.Event(enable_timing=True)
+            end_event = torch.cuda.Event(enable_timing=True)
+            timings = []
+            
+            for _ in range(100):
+                start_event.record()
+                y = kernel(x, block_size, num_warps)
+                end_event.record()
+                torch.cuda.synchronize()
+                timings.append(start_event.elapsed_time(end_event))
+            
+            # Calculate metrics
+            avg_time = sum(timings) / len(timings)
+            total_data = x.element_size() * x.numel() * 2  # read and write
+            throughput = total_data / avg_time * 1000 / 1e9  # GB/s
+            
+            # Store result
+            results.append({
+                'block_size': block_size,
+                'num_warps': num_warps,
+                'avg_time_ms': avg_time,
+                'throughput_gb_s': throughput
+            })
+            
+            # Store in heatmap data
+            throughput_data[i, j] = throughput
+            
+            print(f"Block Size: {block_size}x{block_size}, Warps: {num_warps}")
+            print(f"  Avg time: {avg_time:.3f} ms")
+            print(f"  Throughput: {throughput:.2f} GB/s")
+    
+    # Create heatmap
+    plt.figure(figsize=(10, 8))
+    im = plt.imshow(throughput_data, cmap='viridis')
+    plt.colorbar(im, label='Throughput (GB/s)')
+    plt.title('Throughput vs. Block Size and Warp Count')
+    
+    # Set x and y ticks
+    plt.xticks(np.arange(len(warp_counts)), warp_counts)
+    plt.yticks(np.arange(len(block_sizes)), block_sizes)
+    
+    plt.xlabel('Number of Warps')
+    plt.ylabel('Block Size')
+    
+    # Annotate heatmap with values
+    for i in range(len(block_sizes)):
+        for j in range(len(warp_counts)):
+            text = plt.text(j, i, f"{throughput_data[i, j]:.1f}",
+                           ha="center", va="center", color="w" if throughput_data[i, j] < throughput_data.max()*0.7 else "black")
+    
+    plt.tight_layout()
+    timestamp = time.strftime("%Y%m%d-%H%M%S")
+    plt.savefig(f'silu_throughput_heatmap_{timestamp}.png')
+    plt.show()
+    
     return results
+
+def single_benchmark(x, block_size=128, num_warps=32):
+  # Warmup
+  for _ in range(10):
+      y = silu_non_strided(x, block_size, num_warps)
+  
+  # Benchmark
+  start_event = torch.cuda.Event(enable_timing=True)
+  end_event = torch.cuda.Event(enable_timing=True)
+  timings = []
+  
+  for _ in range(100):
+      start_event.record()
+      y = silu_non_strided(x, block_size, num_warps)
+      end_event.record()
+      torch.cuda.synchronize()
+      timings.append(start_event.elapsed_time(end_event))
+  
+  # Calculate metrics
+  avg_time = sum(timings) / len(timings)
+  total_data = x.element_size() * x.numel() * 2  # read and write
+  throughput = total_data / avg_time * 1000 / 1e9  # GB/s
+  
+  print(f"Block Size: {block_size}x{block_size}, Warps: {num_warps}")
+  print(f"  Avg time: {avg_time:.3f} ms")
+  print(f"  Throughput: {throughput:.2f} GB/s")
 
 def plot_comparison_grid(torch_output, triton_output, grid_size=20):
     import matplotlib.pyplot as plt
@@ -190,7 +309,7 @@ def plot_comparison_grid(torch_output, triton_output, grid_size=20):
                          ha='center', va='center', 
                          color='black' if match_grid[i, j] > 50 else 'white')
     
-    plt.savefig('silu_comparison_grid.png')
+    plt.savefig(f'silu_comparison_grid_{int(time.time())}.png')
     plt.close()
     
     # Also plot a histogram of differences
@@ -217,5 +336,8 @@ if __name__ == "__main__":
   parser = argparse.ArgumentParser()
   parser.add_argument("--profile", action="store_true")
   parser.add_argument("--benchmark", action="store_true")
+  parser.add_argument("--triton_benchmark", action="store_true")
+  parser.add_argument("--single_benchmark", action="store_true")
+  parser.add_argument("--naive", action="store_true")
   args = parser.parse_args()
   main(args)

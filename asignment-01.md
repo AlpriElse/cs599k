@@ -81,6 +81,14 @@ Block Size | Time (ms) | Throughput (GB/s) | Num Blocks
 
 
 
+### 2025-04-18
+- Found this comment about what num_stages actually is
+  - https://github.com/triton-lang/triton/discussions/512
+  - mr. chatgpt helping:
+    - software piplining of memory loads and stores, trade off of latency vs shared memory usage/"register pressure"
+    - too many registers used in a Kernel OR too much Shared Memory Usage per thread block = fewer blocks can run concurrently  ---- there's limited registers and Shared Memory per block
+    
+
 
 # Things to try next
 - triton benchmarking / autotune 
