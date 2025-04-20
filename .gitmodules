@@ -6,3 +6,7 @@
 	path = pybind-example/extern/pybind11
 	url = https://github.com/pybind/pybind11.git
 	branch = stable
+[submodule "silu/CUDA/extern/pybind11"]
+	path = silu/CUDA/extern/pybind11
+	url = https://github.com/pybind/pybind11.git
+	branch = stable
