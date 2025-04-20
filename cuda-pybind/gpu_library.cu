@@ -12,7 +12,7 @@ __global__ void kernel
 {
   unsigned int idx = blockIdx.x * blockDim.x + threadIdx.x;
   if (idx < num_elements) {
-    vec[idx] = vec[idx] * scalar;cudaGetLastError
+    vec[idx] = vec[idx] * scalar;
   }
 }
 

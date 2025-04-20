@@ -5,6 +5,7 @@ find_package(PythonLibs 3.6 REQUIRED)
 
 include_directories(
     ${PYTHON_INCLUDE_DIRS}
+    ../extern/pybind11/include
     )
 
 link_directories(
