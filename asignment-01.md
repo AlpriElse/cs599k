@@ -79,6 +79,9 @@ Block Size | Time (ms) | Throughput (GB/s) | Num Blocks
 - profiling in pytorch
   - https://medium.com/biased-algorithms/mastering-memory-profiling-in-pytorch-40007ced2e46
 
+# Things to try next
+- triton benchmarking / autotune 
+- rms norm, splitting it into two separate kernels
 
 
 ### 2025-04-18
@@ -89,7 +92,7 @@ Block Size | Time (ms) | Throughput (GB/s) | Num Blocks
     - too many registers used in a Kernel OR too much Shared Memory Usage per thread block = fewer blocks can run concurrently  ---- there's limited registers and Shared Memory per block
     
 
+### 2025-04-19
+- CUDA + Pybind
+  - https://github.com/torstem/demo-cuda-pybind11
 
-# Things to try next
-- triton benchmarking / autotune 
-- rms norm, splitting it into two separate kernels
