@@ -4,6 +4,7 @@
 #include <pybind11/pybind11.h>
 #include <pybind11/numpy.h>
 #include <stdio.h>
+#include <torch/extension.h>
 
 namespace py = pybind11;
 
