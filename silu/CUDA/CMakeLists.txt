@@ -25,9 +25,4 @@ add_subdirectory(
 
 pybind11_add_module(silu bindings.cpp silu.cu)
 
-execute_process(
-    COMMAND "${Python_EXECUTABLE}" -c "import site; print(site.getsitepackages()[0])"
-    OUTPUT_VARIABLE PYTHON_SITE_PACKAGES
-    OUTPUT_STRIP_TRAILING_WHITESPACE
-)
-
+install(TARGETS silu DESTINATION .)
