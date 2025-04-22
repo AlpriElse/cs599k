@@ -96,3 +96,10 @@ Block Size | Time (ms) | Throughput (GB/s) | Num Blocks
 - CUDA + Pybind
   - https://github.com/torstem/demo-cuda-pybind11
 
+### 2025-04-21
+- Got Silu working on CUDA with ncu listed memory bandwidth to 89.10% => 2.98 TB/s (assuming 3.36TB/s)
+
+- First vibe coded version of rms_norm using shared memory achievved 67.11% memory throughput => 2.25 TB/s 
+- Added the float4 load and write trick and achieved memory throughput 89.22% memory throughput => 2.99 TB/s
+
+- First vibe coded version of rms_norm against 1x1024x1024 achieved 35.82% memory thorughput => 1.2 TB/s 

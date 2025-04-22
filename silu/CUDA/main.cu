@@ -31,6 +31,13 @@ void run_profile(float* d_input, float* d_output, int block_size, int kernel_typ
     cudaEventCreate(&start);
     cudaEventCreate(&stop);
     
+    // Warmup phase - run a few iterations before timing
+    const int WARMUP_ITERATIONS = 10;
+    for (int i = 0; i < WARMUP_ITERATIONS; i++) {
+        silu(d_input, d_output, MATRIX_SIZE, block_size, kernel_type);
+    }
+    cudaDeviceSynchronize(); // Ensure warmup is complete
+    
     // Start timing
     cudaEventRecord(start);
     
@@ -48,7 +55,7 @@ void run_profile(float* d_input, float* d_output, int block_size, int kernel_typ
     cudaEventElapsedTime(&milliseconds, start, stop);
     
     // Calculate throughput
-    double bytes_processed = static_cast<double>(MATRIX_SIZE) * MATRIX_SIZE * PROFILE_ITERATIONS * sizeof(float);
+    double bytes_processed = 2* static_cast<double>(MATRIX_SIZE) * MATRIX_SIZE * PROFILE_ITERATIONS * sizeof(float);
     double seconds = milliseconds / 1000.0;
     double gb_per_sec = (bytes_processed / seconds) / (1024.0 * 1024.0 * 1024.0);
     
